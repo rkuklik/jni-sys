@@ -1,9 +1,28 @@
-#![allow(bad_style, improper_ctypes)]
-#![allow(clippy::all)]
+#![allow(function_casts_as_integer)]
 
-extern crate jni_sys;
-extern crate libc;
+macro_rules! tests {
+    ($name:ident for $($lib:ident)and*) => {
+        mod $name {
+            $(
+            use $lib::*;
+            )*
+            include!(concat!(env!("OUT_DIR"), "/", stringify!($name), ".rs"));
+            pub fn exec() {
+                eprintln!(concat!("TESTS FOR '", stringify!($name), "'"));
+                main();
+            }
+        }
 
-use jni_sys::*;
+        #[cfg(test)]
+        #[test]
+        fn $name() {
+            $name::exec();
+        }
+    };
+}
 
-include!(concat!(env!("OUT_DIR"), "/all.rs"));
+tests!(jni for jni_sys);
+
+fn main() {
+    jni::exec();
+}
