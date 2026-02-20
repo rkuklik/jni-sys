@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 jni-sys.workspace = true
+jvmti-sys.workspace = true
 libc = "0.2"
 
 [build-dependencies]

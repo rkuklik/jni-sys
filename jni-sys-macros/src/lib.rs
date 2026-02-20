@@ -4,19 +4,24 @@ use std::{cmp::Ordering, collections::HashSet};
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput, Fields, Ident, LitStr};
+use syn::{
+    parse_macro_input, punctuated::Punctuated, spanned::Spanned, Data, DeriveInput, Fields, Ident,
+    LitStr, Token,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-struct JniVersion {
+struct Version {
     major: u16,
     minor: u16,
 }
-impl Default for JniVersion {
+
+impl Default for Version {
     fn default() -> Self {
         Self { major: 1, minor: 1 }
     }
 }
-impl Ord for JniVersion {
+
+impl Ord for Version {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.major.cmp(&other.major) {
             Ordering::Equal => self.minor.cmp(&other.minor),
@@ -24,52 +29,87 @@ impl Ord for JniVersion {
         }
     }
 }
-impl PartialOrd for JniVersion {
+
+impl PartialOrd for Version {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl syn::parse::Parse for JniVersion {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let version: LitStr = input.parse()?;
+impl TryFrom<LitStr> for Version {
+    type Error = syn::Error;
+
+    fn try_from(version: LitStr) -> Result<Self, Self::Error> {
+        let span = version.span();
         let version = version.value();
         if version == "reserved" {
             // We special case version 999 later instead of making JniVersion an enum
-            return Ok(JniVersion {
+            return Ok(Version {
                 major: 999,
                 minor: 0,
             });
         }
         let mut split = version.splitn(2, '.');
         const EXPECTED_MSG: &str = "Expected \"major.minor\" version number or \"reserved\"";
-        let major = split
-            .next()
-            .ok_or(syn::Error::new(input.span(), EXPECTED_MSG))?;
+        let major = split.next().ok_or(syn::Error::new(span, EXPECTED_MSG))?;
         let major = major
             .parse::<u16>()
-            .map_err(|_| syn::Error::new(input.span(), EXPECTED_MSG))?;
+            .map_err(|_| syn::Error::new(span, EXPECTED_MSG))?;
         let minor = split
             .next()
             .unwrap_or("0")
             .parse::<u16>()
-            .map_err(|_| syn::Error::new(input.span(), EXPECTED_MSG))?;
-        Ok(JniVersion { major, minor })
+            .map_err(|_| syn::Error::new(span, EXPECTED_MSG))?;
+        Ok(Version { major, minor })
     }
 }
 
-fn jni_to_union_impl(input: DeriveInput) -> syn::Result<TokenStream> {
+impl syn::parse::Parse for Version {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        input.parse::<LitStr>()?.try_into()
+    }
+}
+
+struct Config {
+    name: String,
+    version_default: Version,
+}
+
+impl syn::parse::Parse for Config {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut args = Punctuated::<LitStr, Token![,]>::parse_terminated(input)?.into_iter();
+        let name = args
+            .next()
+            .map(|s| s.value())
+            .unwrap_or_else(|| "JNI".to_string());
+        let version_default = args
+            .next()
+            .map(Version::try_from)
+            .transpose()?
+            .unwrap_or_default();
+        Ok(Self {
+            name,
+            version_default,
+        })
+    }
+}
+
+fn jni_to_union_impl(cfg: Config, input: DeriveInput) -> syn::Result<TokenStream> {
     let original_name = &input.ident;
     let original_visibility = &input.vis;
 
     let mut versions = HashSet::new();
     let mut versioned_fields = vec![];
 
+    let Config {
+        name,
+        version_default,
+    } = cfg;
+
     if let Data::Struct(data) = &input.data {
         if let Fields::Named(fields) = &data.fields {
             for field in &fields.named {
-                // Default to version 1.1
-                let mut min_version = JniVersion::default();
+                let mut min_version = version_default;
 
                 let mut field = field.clone();
 
@@ -83,7 +123,7 @@ fn jni_to_union_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                     }
                 });
                 if let Some(attr) = jni_added_attr {
-                    let version = attr.parse_args::<JniVersion>()?;
+                    let version = attr.parse_args::<Version>()?;
                     min_version = version;
                 }
 
@@ -160,7 +200,7 @@ fn jni_to_union_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
 
                 let api_comment =
-                    format!("API when JNI version >= `JNI_VERSION_{}`", version_suffix);
+                    format!("API when {name} version >= `{name}_VERSION_{version_suffix}`");
                 union_members.extend(quote! {
                     #[doc = #api_comment]
                     #original_visibility #version_ident: #struct_ident,
@@ -185,10 +225,11 @@ fn jni_to_union_impl(input: DeriveInput) -> syn::Result<TokenStream> {
 }
 
 #[proc_macro_attribute]
-pub fn jni_to_union(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn jni_to_union(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
+    let args = parse_macro_input!(attr as Config);
 
-    match jni_to_union_impl(input) {
+    match jni_to_union_impl(args, input) {
         Ok(tokens) => tokens,
         Err(err) => err.into_compile_error().into(),
     }

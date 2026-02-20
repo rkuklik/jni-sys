@@ -22,7 +22,9 @@ macro_rules! tests {
 }
 
 tests!(jni for jni_sys);
+tests!(jvmti for jvmti_sys);
 
 fn main() {
     jni::exec();
+    jvmti::exec();
 }
