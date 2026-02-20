@@ -140,4 +140,11 @@ fn main() {
             )
         }) // We don't need to be able to roundtrip all possible u8 values for a jboolean, since only 0 are 1 are considered valid.
         .export("jni");
+    cfg.test()
+        .skip_field(|s, _| matches!(s, "jvmtiInterface_1_" | "jvmtiCapabilities")) // ctest2 isn't able to test these unions
+        .skip_roundtrip(|s| matches!(s, "jvmtiInterface_1_"))
+        .skip_type(|name| name.starts_with("Agent_"))
+        .define("enum_t", Some("int"))
+        .cfg("systest", None)
+        .export("jvmti");
 }
