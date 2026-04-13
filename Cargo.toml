@@ -19,8 +19,8 @@ rust-version = "1.77.0"
 exclude = ["/.github"]
 
 [workspace.dependencies]
-jni-sys-macros = { path = "jni-sys-macros" }
-jni-sys = { path = "jni-sys" }
-jvmti-sys = { path = "jvmti-sys", package = "jvm-ti-sys" }
+jni-sys-macros = { path = "jni-sys-macros", version = "0.4.1" }
+jni-sys = { path = "jni-sys", version = "0.4.1" }
+jvmti-sys = { path = "jvmti-sys", package = "jvm-ti-sys", version = "0.0.0" }
 trybuild = "1"
 thiserror = "2"
